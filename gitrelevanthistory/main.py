@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 
 """
-Extract enough git history to facilitate git blame and have each line correctly annotated
+Extract enough git history to facilitate git blame and have each line correctly annotated.
 
 Wipe all history that has no connection to the current state of the repository.
 
 The resulting repository is a drop-in replacement for the old directory and has all history needed for typical git history use.
 
 Usage:
-  git-relevant-history [options] --source=<source_repo> --subdir=<subdir> --target=<target_repo>
+  git-relevant-history [options] --source=<source_repo> --filter=<filter> --target=<target_repo>
 
 Where git repo at <source_repo> would be processed into <target_repo>, in a way that only files starting with
-<subdir> would be preserved (<subdir> is relative to <source_repo>).
+<filter> would be preserved (<filter> can be a subdirectory relative to <source_repo>, or text file containing
+filepaths relative to <source_repo>).
 
 
 Options:
+  --branch=<branch>    Branch to process on the source [default: master]
   --only-specs         Only print git filter-repo specs file as expected by git filter-repo --paths-from-file
   -h --help            show this help message and exit
   -f --force           remove <target_repo> if exists
@@ -35,13 +37,38 @@ logging.basicConfig(format=log_format, level=logging.DEBUG)
 
 logger = logging.root
 
-def build_git_filter_path_spec(git_repo: pathlib.Path, str_subdir: str) -> typing.List[str]:
-    git_repo_subdir = git_repo / str_subdir
-    logger.debug(f"Processing files in {git_repo_subdir}")
+def build_git_filter_path_spec(git_repo: pathlib.Path, filter: str) -> typing.List[str]:
+
+    init_files_list = []
+    if not pathlib.Path(filter).exists():
+        logger.debug(f"Filter is not a file, assuming it is a subdirectory of {git_repo}")
+
+        str_subdir = filter
+        if not str_subdir.endswith('/'):
+            str_subdir = str_subdir + '/'
+
+        git_repo_subdir = git_repo / str_subdir
+        if not git_repo_subdir.is_dir():
+            logger.critical(f"Filter {filter} is not a file, and {git_repo_subdir} is not a directory")
+            raise SystemExit(-1)
+        logger.debug(f"Globbing files in {git_repo_subdir}")
+        init_files_list = list(git_repo_subdir.rglob('*'))
+    else:
+        logger.debug(f"Filter is a file, assuming it contains paths relative to {git_repo}")
+        filter_file = pathlib.Path(filter)
+        with open(filter_file) as infile:
+            init_files_list = [git_repo / pathlib.Path(line.strip()) for line in infile]
+
+
+    if len(init_files_list) == 0:
+        logger.critical(f"Filter {filter} did not match any files")
+        raise SystemExit(-1)
+
+
     all_filter_paths = []
     all_rename_statements = []
 
-    for strpath in git_repo_subdir.rglob('*'):
+    for strpath in init_files_list:
         path = pathlib.Path(strpath)
 
         if path.is_file():
@@ -82,7 +109,7 @@ def build_git_filter_path_spec(git_repo: pathlib.Path, str_subdir: str) -> typin
     if logger.isEnabledFor(logging.DEBUG):
         all_rename_statements_newlines = '\n\t'.join(all_rename_statements)
         logger.debug(f"All renames:\n\t{all_rename_statements_newlines}")
-    return all_filter_paths
+    return all_filter_paths, init_files_list
 
 
 def main():
@@ -91,6 +118,13 @@ def main():
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
+    
+    # Check git-filter-repo is available
+    try:
+        subprocess.check_call(["git", "filter-repo", "--version"], stdout=subprocess.DEVNULL)
+    except FileNotFoundError as e:
+        logger.critical("'git filter-repo' is not available, check you have added it to your PATH")
+        raise SystemExit(-1)
 
     source_repo = pathlib.Path(arguments["--source"]).expanduser().absolute()
     if not source_repo.is_dir():
@@ -101,14 +135,11 @@ def main():
         logger.critical(f"--source {source_repo} is missing .git subdir - it need to be root of existing git repo.")
         raise SystemExit(-1)
 
-    subdir = arguments["--subdir"]
-    if not subdir.endswith('/'):
-        subdir = subdir + '/'
+    filter = arguments["--filter"]
 
-    source_subdir = source_repo / subdir
-    if not source_repo.is_dir():
-        logger.critical(f"--source {source_repo / subdir} is not a directory")
-        raise SystemExit(-1)
+    branch = "master"
+    if arguments["--branch"]:
+        branch = arguments["--branch"]
 
     target_repo = pathlib.Path(arguments["--target"]).expanduser().absolute()
     if target_repo.exists() and not arguments["--only-specs"]:
@@ -118,7 +149,7 @@ def main():
             logger.critical(f"Target directory {target_repo} already exists. Use --force to override")
             raise SystemExit(-1)
 
-    logger.info(f"Will convert repo at {source_repo / subdir} into {target_repo} preserving file history")
+    # logger.info(f"Will convert repo at {source_repo / subdir} into {target_repo} preserving file history")
 
     with tempfile.TemporaryDirectory() as str_workdir:
         workdir = pathlib.Path(str_workdir)
@@ -129,14 +160,14 @@ def main():
                      " and also protects current repo state and history.")
 
         workclone_cmd = ["git", "clone",
-                         "--branch", "master",
+                         "--branch", branch,
                          "--single-branch",
                          "file://" + str(source_repo),
                          str(workclone)]
         logger.debug(f"Calling {' '.join(workclone_cmd)}")
         subprocess.check_call(workclone_cmd)
 
-        filenameset = build_git_filter_path_spec(workclone, subdir)
+        filenameset, init_files_list = build_git_filter_path_spec(workclone, filter)
         filter_repo_paths_file = workdir / "filter_path_specs.txt"
         with open(filter_repo_paths_file, "w") as outfile:
             for line in filenameset:
@@ -172,17 +203,21 @@ def main():
         subprocess.check_call(wipe_all_args,
                               universal_newlines=True)
 
-        restore_subdir_args = ["git",
-                               "-C",
-                               str(workclone),
-                               "checkout",
-                               "HEAD",
-                               "--",
-                               subdir
-                               ]
-        logger.debug(f"Calling {' '.join(restore_subdir_args)}")
-        subprocess.check_call(restore_subdir_args,
-                              universal_newlines=True)
+        # Iterate over the files in the init_files_list and restore them
+        # This is inefficient if a subdirectory is specified, but this way
+        # it's agnostic to the filter method (subdir or list of files)
+        for file in init_files_list:
+            restore_subdir_args = ["git",
+                                "-C",
+                                str(workclone),
+                                "checkout",
+                                "HEAD",
+                                "--",
+                                file.as_posix()
+                                ]
+            logger.debug(f"Calling {' '.join(restore_subdir_args)}")
+            subprocess.check_call(restore_subdir_args,
+                                universal_newlines=True)
 
         check_if_repo_is_dirty_args = ["git",
                                        "-C",
