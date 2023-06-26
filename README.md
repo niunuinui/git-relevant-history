@@ -19,20 +19,22 @@ Usage documentation for the tool is available via cmdline:
 git-relevant-history --help:
 
 ```
-Extract enough git history to facilitate git blame and have each line correctly annotated
+Extract enough git history to facilitate git blame and have each line correctly annotated.
 
 Wipe all history that has no connection to the current state of the repository.
 
 The resulting repository is a drop-in replacement for the old directory and has all history needed for typical git history use.
 
 Usage:
-  git-relevant-history [options] --source=<source_repo> --subdir=<subdir> --target=<target_repo>
+  git-relevant-history [options] --source=<source_repo> --filter=<filter> --target=<target_repo>
 
 Where git repo at <source_repo> would be processed into <target_repo>, in a way that only files starting with
-<subdir> would be preserved.
+<filter> would be preserved (<filter> can be a subdirectory relative to <source_repo>, or text file containing
+filepaths relative to <source_repo>).
 
 
 Options:
+  --branch=<branch>    Branch to process on the source [default: master]
   --only-specs         Only print git filter-repo specs file as expected by git filter-repo --paths-from-file
   -h --help            show this help message and exit
   -f --force           remove <target_repo> if exists
