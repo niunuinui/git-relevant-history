@@ -20,6 +20,7 @@ Options:
   --only-specs         Only print git filter-repo specs file as expected by git filter-repo --paths-from-file
   -h --help            show this help message and exit
   -f --force           remove <target_repo> if exists
+  -g --glob            use pathlib rglob to find files. Expects a filter input file with filesNames*
   -v --verbose         print status messages
 
 """
@@ -37,7 +38,8 @@ logging.basicConfig(format=log_format, level=logging.DEBUG)
 
 logger = logging.root
 
-def build_git_filter_path_spec(git_repo: pathlib.Path, filter: str) -> typing.List[str]:
+
+def build_git_filter_path_spec(git_repo: pathlib.Path, filter: str, glob_filter_list: bool = False) -> typing.List[str]:
 
     init_files_list = []
     if not pathlib.Path(filter).exists():
@@ -57,8 +59,18 @@ def build_git_filter_path_spec(git_repo: pathlib.Path, filter: str) -> typing.Li
         logger.debug(f"Filter is a file, assuming it contains paths relative to {git_repo}")
         filter_file = pathlib.Path(filter)
         with open(filter_file) as infile:
-            init_files_list = [git_repo / pathlib.Path(line.strip()) for line in infile]
+            if not glob_filter_list:
+                init_files_list = [git_repo / pathlib.Path(line.strip()) for line in infile]
+            else:
+                paths: typing.Set[str] = set()
 
+                filter_str: str = infile.readline().strip()
+                while filter_str:
+                    result = set(pathlib.Path(git_repo).rglob(filter_str))
+                    paths = paths.union(result)
+                    filter_str = infile.readline().strip()
+
+                init_files_list = list(paths)
 
     if len(init_files_list) == 0:
         logger.critical(f"Filter {filter} did not match any files")
@@ -103,7 +115,7 @@ def build_git_filter_path_spec(git_repo: pathlib.Path, filter: str) -> typing.Li
                 all_filter_paths.extend(unique_paths_of_current_file)
 
             except subprocess.CalledProcessError as e:
-                logger.warning(f"Failed to get hystorical names of {repo_path}, stdout: {e.output}, stderr: {e.stderr}")
+                logger.warning(f"Failed to get historical names of {repo_path}, stdout: {e.output}, stderr: {e.stderr}")
                 logger.warning(f"Failed command: {' '.join(git_args)}")
 
     if logger.isEnabledFor(logging.DEBUG):
@@ -141,6 +153,10 @@ def main():
     if arguments["--branch"]:
         branch = arguments["--branch"]
 
+    glob_filter_file = "False"
+    if arguments["--glob"] or arguments["-g"]:
+        glob_filter_file = True
+
     target_repo = pathlib.Path(arguments["--target"]).expanduser().absolute()
     if target_repo.exists() and not arguments["--only-specs"]:
         if arguments["--force"]:
@@ -167,7 +183,7 @@ def main():
         logger.debug(f"Calling {' '.join(workclone_cmd)}")
         subprocess.check_call(workclone_cmd)
 
-        filenameset, init_files_list = build_git_filter_path_spec(workclone, filter)
+        filenameset, init_files_list = build_git_filter_path_spec(workclone, filter, glob_filter_file)
         filter_repo_paths_file = workdir / "filter_path_specs.txt"
         with open(filter_repo_paths_file, "w") as outfile:
             for line in filenameset:
