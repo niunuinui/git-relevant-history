@@ -153,8 +153,8 @@ def main():
     if arguments["--branch"]:
         branch = arguments["--branch"]
 
-    glob_filter_file = "False"
-    if arguments["--glob"] or arguments["-g"]:
+    glob_filter_file = False
+    if arguments["--glob"]:
         glob_filter_file = True
 
     target_repo = pathlib.Path(arguments["--target"]).expanduser().absolute()
