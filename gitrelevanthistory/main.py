@@ -38,44 +38,40 @@ logging.basicConfig(format=log_format, level=logging.DEBUG)
 
 logger = logging.root
 
-
+def gen_filepath_for_gitfilter(git_repo: pathlib.Path, filter: str)-> typing.Set[str]:
+    git_repo_subdir = git_repo / filter
+    if git_repo_subdir.is_file():
+        return [git_repo_subdir]
+    else:
+        if not filter.endswith('/'):
+            filter = filter + '/'
+        git_repo_subdir = git_repo / filter
+        logger.debug(f"Globbing files in {git_repo_subdir}")
+        return set(git_repo_subdir.rglob('*'))
+ 
 def build_git_filter_path_spec(git_repo: pathlib.Path, filter: str, glob_filter_list: bool = False) -> typing.List[str]:
-
+    paths: typing.Set[str] = set()
     init_files_list = []
     if not pathlib.Path(filter).exists():
-        logger.debug(f"Filter is not a file, assuming it is a subdirectory of {git_repo}")
-
-        str_subdir = filter
-        if not str_subdir.endswith('/'):
-            str_subdir = str_subdir + '/'
-
-        git_repo_subdir = git_repo / str_subdir
-        if not git_repo_subdir.is_dir():
-            logger.critical(f"Filter {filter} is not a file, and {git_repo_subdir} is not a directory")
-            raise SystemExit(-1)
-        logger.debug(f"Globbing files in {git_repo_subdir}")
-        init_files_list = list(git_repo_subdir.rglob('*'))
+        logger.debug(f"Filter is not a file, assuming it is a file or subdirectory of {git_repo}")
+        paths = gen_filepath_for_gitfilter(git_repo,filter)        
     else:
         logger.debug(f"Filter is a file, assuming it contains paths relative to {git_repo}")
         filter_file = pathlib.Path(filter)
         with open(filter_file) as infile:
-            if not glob_filter_list:
-                init_files_list = [git_repo / pathlib.Path(line.strip()) for line in infile]
-            else:
-                paths: typing.Set[str] = set()
-
-                filter_str: str = infile.readline().strip()
-                while filter_str:
+            filter_str: str = infile.readline().strip()
+            while filter_str:                
+                if glob_filter_list:
                     result = set(pathlib.Path(git_repo).rglob(filter_str))
-                    paths = paths.union(result)
-                    filter_str = infile.readline().strip()
-
-                init_files_list = list(paths)
+                else:
+                    result = gen_filepath_for_gitfilter(git_repo,filter_str)
+                paths = paths.union(result)
+                filter_str = infile.readline().strip()
+    init_files_list = list(paths)
 
     if len(init_files_list) == 0:
         logger.critical(f"Filter {filter} did not match any files")
         raise SystemExit(-1)
-
 
     all_filter_paths = []
     all_rename_statements = []

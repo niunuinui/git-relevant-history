@@ -12,6 +12,8 @@ This tool also starts with "what is subcomponent in the current repo to extract?
 
 So from the extracted component perspective, the only history "lost" is one that would require manual analysis of commits to find file merging/splitting.
 
+## Installation
+pip install .
 
 ## Help
 Usage documentation for the tool is available via cmdline:
@@ -38,8 +40,10 @@ Options:
   --only-specs         Only print git filter-repo specs file as expected by git filter-repo --paths-from-file
   -h --help            show this help message and exit
   -f --force           remove <target_repo> if exists
+  -g --glob            use pathlib rglob to find files. Expects a filter input file with filesNames*
+                       [default: expects path-to-file or path-to-subdirectory]
   -v --verbose         print status messages
   ```
   Calling when git-relevant-history repo is cloned locally:
   
-  ./gitrelevanthistory/main.py --source=<big-repo> --subdir=<subdir-of-big-repo> --target=<path-of-extracted-small-repo>
+  ./gitrelevanthistory/main.py --source=<big-repo> --filter=<subdir-of-big-repo> --target=<path-of-extracted-small-repo>
